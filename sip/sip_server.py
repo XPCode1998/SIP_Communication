@@ -24,27 +24,27 @@ class SIPServer:
         self.server_ip = local_ip
         self.server_port = local_port
 
+        # 报文相关
+        self.cseq = 0
         self.allow = ['MESSAGE', 'REFER', 'INFO', 'NOTIFY', 'SUBSCRIBE', 'CANCEL', 'BYE', 'OPTIONS', 'ACK', 'INVITE']
         self.supported = ['100rel', 'replaces']
 
+        # 服务器信息
+        with open('./config/response_message_body.json', 'r') as file:
+            self.data = json.load(file)
         self.channel_list = []  # 通道列表
         self.role_list = []  # 角色列表
         self.frequency_list = []  # 频率列表
         self.radio_list = []  # 电台列表
 
-        # 当前选择
-        # 加入检索电台是发送还是接收、是否可用的逻辑
-        self.selected_role = None
-        self.send_frequency = []
-        self.recv_frequency = []
+        # 当前状态
+        self.status = "offline"  # 状态: "online", "offline", "busy"
         self.send_radio = []
         self.recv_radio = []
-
-        with open('./config/response_message_body.json', 'r') as file:
-            self.data = json.load(file)
-
-        # 状态
-        self.status = "offline"  # 状态: "online", "offline", "busy"
+        # 加入检索电台是发送还是接收、是否可用的逻辑
+        # self.selected_role = None
+        # self.send_frequency = []
+        # self.recv_frequency = []
 
         # PTT状态
         self.ptt = False
@@ -58,6 +58,13 @@ class SIPServer:
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind((self.local_ip, self.local_port))
         print(f"SIP Client initialized on {self.local_ip}:{self.local_port}")
+
+        self.comm_count = 0
+
+    def _cseq_increment(self):
+        """递增CSeq序号"""
+        self.cseq += 1
+        return self.cseq
 
     def _base64_encode(self, data, urlsafe=False):
         """
@@ -257,7 +264,6 @@ class SIPServer:
             )
             msg = self.message_generator.generate_message(params)
             self._send_message(msg)
-            self.rtp_endpoint.start()
             params = BaseMessageParams(
                 branch=recv_params.branch,
                 call_id=recv_params.call_id,
@@ -280,6 +286,9 @@ class SIPServer:
             )
             msg = self.message_generator.generate_message(params)
             self._send_message(msg)
+            self.comm_count += 1
+            self.rtp_endpoint.start()
+        
         elif recv_params.message_type == "REFER":
             params = BaseMessageParams(
                 branch=recv_params.branch,
@@ -298,6 +307,7 @@ class SIPServer:
             )
             msg = self.message_generator.generate_message(params)
             self._send_message(msg)
+            self.comm_count += 1
 
     def response_bye(self, recv_params):
         """回复退出电台"""
@@ -319,6 +329,7 @@ class SIPServer:
             )
             msg = self.message_generator.generate_message(params)
             self._send_message(msg)
+            self.comm_count -=1
         elif recv_params.message_type == "BYE":
             params = BaseMessageParams(
                 branch=recv_params.branch,
@@ -337,6 +348,9 @@ class SIPServer:
             )
             msg = self.message_generator.generate_message(params)
             self._send_message(msg)
+            self.rtp_endpoint.stop()
+            self.comm_count -= 1
+        if self.comm_count == 0:
             self.rtp_endpoint.stop()
 
     def _generate_default_sdp(self):
@@ -358,9 +372,9 @@ class SIPServer:
             message = data.decode('utf-8')
             print(f"Received message from {addr}:\n{message}")
             # 例如根据消息类型调用不同的处理方法
-            self.handle_message(message)
+            self._handle_message(message)
 
-    def handle_message(self, message):
+    def _handle_message(self, message):
         header_part, _, body = message.partition('\r\n\r\n')
         recv_params = parse_sip_message(header_part)
         print(recv_params.message_type)

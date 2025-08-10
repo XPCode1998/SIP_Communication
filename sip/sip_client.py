@@ -31,36 +31,50 @@ class SIPClient:
         # 服务器
         self.server_ip = remote_ip
         self.server_port = remote_port
+
+        # 报文相关
+        self.cseq = 0
         self.allow = ['MESSAGE', 'REFER', 'INFO', 'NOTIFY', 'SUBSCRIBE', 'CANCEL', 'BYE', 'OPTIONS', 'ACK', 'INVITE']
         self.supported = ['100rel', 'replaces']
+
+        # 服务器信息
         self.channel_list = []  # 通道列表
         self.role_list = []  # 角色列表
         self.frequency_dict = {}  # 频率列表
         self.radio_dict = {}  # 电台列表
-        # 当前选择
-        # 加入检索电台是发送还是接收、是否可用的逻辑
-        self.selected_role = None
-        # self.send_frequency = []
-        # self.recv_frequency = []
+
+        # 当前状态
+        self.status = "offline"  # 状态: "online", "offline", "busy"
         self.send_radio = []
         self.recv_radio = []
-        # self.selected = False
+        # 加入检索电台是发送还是接收、是否可用的逻辑
+        # self.selected_role = None
+        # self.send_frequency = []
+        # self.recv_frequency = []
+        
         # 控制报文收发时序逻辑
         self.cseq_history = deque(maxlen=100)  # 消息历史记录
-        self.message_queue = deque()  # 待发送消息队列
-        self.processing_message = False  # 消息处理状态标志
-        self.last_cseq = 0  # 最后使用的CSeq序号
-        # 状态
-        self.status = "offline"  # 状态: "online", "offline", "busy"
+
+        # 超时重传逻辑
+        self.retry_timeout = 5  # 重传超时时间
+        self.max_retries = 3  # 最大重传次数
+
         # PTT状态
         self.ptt = False
+        
         # 消息生成器和RTP客户端
         self.message_generator = MessageGenerator()
         self.rtp_endpoint = RtpEndpoint(local_ip, local_rtp_port, remote_ip, remote_rtp_port)
+        
         # 创建UDP套接字
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind((self.local_ip, self.local_port))
         print(f"SIP Client initialized on {self.local_ip}:{self.local_port}")
+
+    def _cseq_increment(self):
+        """递增CSeq序号"""
+        self.cseq += 1
+        return self.cseq
 
     def _base64_encode(self, data, urlsafe=False):
         """
@@ -73,46 +87,21 @@ class SIPClient:
             encoded_bytes = base64.b64encode(bytes_data)
         return encoded_bytes.decode('utf-8')
 
-    # def _get_next_cseq(self):
-    #     """获取下一个CSeq序号"""
-    #     self.last_cseq += 1
-    #     return self.last_cseq
-
-    def _send_message(self, cseq, params, message):
+    def _send_message(self, params, message):
         """发送SIP消息(带时序控制)"""
-        params.cseq = cseq
         # 记录发送历史
-        if len(self.cseq_history) == 0 and not self.processing_message:
-            print("没有待发送消息，直接发送")
-            self._send_message_now(params, message)
-            return
-        # 如果正在处理消息，则加入队列
-        else:
-            self.message_queue.append((params, message))
-            print(f"消息已加入队列(CSeq: {params.cseq})")
-            return
-
-    def _send_message_now(self, params, message):
-        """实际发送消息"""
-        try:
+        if len(self.cseq_history) == 0:
             self.socket.sendto(message.encode(), (self.remote_ip, self.remote_port))
-            if params.message_type != "ACK":
-                self.cseq_history.append((params.cseq, params))
-        except Exception as e:
-            print(f"发送消息出错: {e}")
-
-    # def _process_message_queue(self):
-    #     """处理消息队列中的待发消息"""
-    #     while len(self.message_queue) == 0 and not self.processing_message:
-    #         params, message = self.message_queue.popleft()
-    #         self._send_message_now(params, message)
-    #         return
-
+            send_time = time.time()
+            retry_count = 0
+            self.cseq_history.append((params.cseq, message, send_time, retry_count))
+            
     def keep_alive(self):
         """心跳报文"""
         while len(self.cseq_history) > 0:
             pass
         params = InfoParams(
+            cseq = self._cseq_increment(),
             local_user=self.user,
             local_ip=self.local_ip,
             local_port=self.local_port,
@@ -128,13 +117,14 @@ class SIPClient:
         else:
             params.subject = "vcu_login"
         msg = self.message_generator.generate_message(params)
-        self._send_message(self.message_generator.cseq, params, msg)
+        self._send_message(params, msg)
 
     def register(self):
         """注册报文"""
         while len(self.cseq_history) > 0:
             pass
         params = RegisterParams(
+            cseq = self._cseq_increment(),
             local_user=self.user,
             password=self.password,
             local_ip=self.local_ip,
@@ -149,13 +139,14 @@ class SIPClient:
             cwp=self.user,
         )
         msg = self.message_generator.generate_message(params)
-        self._send_message(self.message_generator.cseq, params, msg)
+        self._send_message(params, msg)
 
     def get_phone_btn(self):
         """获取通道列表"""
         while len(self.cseq_history) > 0:
             pass
         params = InfoParams(
+            cseq = self._cseq_increment(),
             local_user=self.user,
             local_ip=self.local_ip,
             local_port=self.local_port,
@@ -168,13 +159,14 @@ class SIPClient:
             roleid=self.selected_role if self.selected_role else None,
         )
         msg = self.message_generator.generate_message(params)
-        self._send_message(self.message_generator.cseq, params, msg)
+        self._send_message(params, msg)
 
     def get_frequency_btn(self):
         """获取频率列表"""
         while len(self.cseq_history) > 0:
             pass
         params = InfoParams(
+            cseq = self._cseq_increment(),
             local_user=self.user,
             local_ip=self.local_ip,
             local_port=self.local_port,
@@ -187,13 +179,14 @@ class SIPClient:
             roleid=self.selected_role if self.selected_role else None,
         )
         msg = self.message_generator.generate_message(params)
-        self._send_message(self.message_generator.cseq, params, msg)
+        self._send_message(params, msg)
 
     def get_radio_btn(self):
         """获取电台列表"""
         while len(self.cseq_history) > 0:
             pass
         params = InfoParams(
+            cseq = self._cseq_increment(),
             local_user=self.user,
             local_ip=self.local_ip,
             local_port=self.local_port,
@@ -206,13 +199,14 @@ class SIPClient:
             roleid=self.selected_role if self.selected_role else None,
         )
         msg = self.message_generator.generate_message(params)
-        self._send_message(self.message_generator.cseq, params, msg)
+        self._send_message(params, msg)
 
     def get_function_btn(self):
         """获取功能列表"""
         while len(self.cseq_history) > 0:
             pass
         params = InfoParams(
+            cseq = self._cseq_increment(),
             local_user=self.user,
             local_ip=self.local_ip,
             local_port=self.local_port,
@@ -225,13 +219,14 @@ class SIPClient:
             roleid=self.selected_role if self.selected_role else None,
         )
         msg = self.message_generator.generate_message(params)
-        self._send_message(self.message_generator.cseq, params, msg)
+        self._send_message(params, msg)
 
     def get_all_frequency_btn(self):
         """获取所有频率"""
         while len(self.cseq_history) > 0:
             pass
         params = InfoParams(
+            cseq = self._cseq_increment(),
             local_user=self.channel_list[0],
             local_ip=self.local_ip,
             local_port=self.local_port,
@@ -244,7 +239,7 @@ class SIPClient:
             roleid=self.selected_role if self.selected_role else None,
         )
         msg = self.message_generator.generate_message(params)
-        self._send_message(self.message_generator.cseq, params, msg)
+        self._send_message(params, msg)
 
     def select_radio(self, channel):
         while len(self.cseq_history) > 0:
@@ -252,6 +247,7 @@ class SIPClient:
         if len(self.send_radio) + len(self.recv_radio) == 0:
             print("第一次选中电台")
             params = BaseMessageParams(
+                cseq = self._cseq_increment(),
                 local_user=self.channel_list[2],
                 local_ip=self.local_ip,
                 local_port=self.local_port,
@@ -271,6 +267,7 @@ class SIPClient:
         else:
             print("再次选中电台")
             params = ReferParams(
+                cseq = self._cseq_increment(),
                 local_user=self.channel_list[2],
                 local_ip=self.local_ip,
                 local_port=self.local_port,
@@ -285,11 +282,12 @@ class SIPClient:
                 refered_by=True,
             )
         msg = self.message_generator.generate_message(params)
-        self._send_message(self.message_generator.cseq, params, msg)
+        self._send_message(params, msg)
 
     def ack(self):
         """发送ACK报文"""
         params = BaseMessageParams(
+            cseq = self._cseq_increment(),
             local_user=self.channel_list[2],
             local_ip=self.local_ip,
             local_port=self.local_port,
@@ -303,7 +301,7 @@ class SIPClient:
             supported=self.supported,
         )
         msg = self.message_generator.generate_message(params)
-        self._send_message(self.message_generator.cseq, params, msg)
+        self._send_message(params, msg)
 
     def bye(self, channel):
         """退出电台选中"""
@@ -312,6 +310,7 @@ class SIPClient:
         if len(self.send_radio) + len(self.recv_radio) > 0:
             print("退出电台选中")
             params = ReferParams(
+                cseq = self._cseq_increment(),
                 local_user=self.channel_list[2],
                 local_ip=self.local_ip,
                 local_port=self.local_port,
@@ -329,6 +328,7 @@ class SIPClient:
         else:
             print("退出最后一个电台")
             params = BaseMessageParams(
+                cseq = self._cseq_increment(),
                 local_user=self.channel_list[2],
                 local_ip=self.local_ip,
                 local_port=self.local_port,
@@ -341,7 +341,7 @@ class SIPClient:
                 expires=5,
             )
         msg = self.message_generator.generate_message(params)
-        self._send_message(self.message_generator.cseq, params, msg)
+        self._send_message(params, msg)
 
     def key_up(self):
         """PTT按下"""
@@ -359,34 +359,31 @@ class SIPClient:
             "a=rtpmap:8 PCMA/8000\r\n"
             "a=sendrecv\r\n"
         )
+    
+    def _check_timeout(self):
+        """检查超时"""
+        current_time = time.time()
+        params, message, send_time, retry_count = self.cseq_history[0] if len(self.cseq_history) > 0 else (None, None, None, None)
+        if current_time - send_time > self.retry_timeout:
+            if retry_count < self.max_retries:
+                self.socket.sendto(message.encode(), (self.remote_ip, self.remote_port))
+                self.cseq_history[0] = (params, message, current_time, retry_count + 1)
+                print(f"消息 (CSeq: {params.cseq}) 超时未确认，进行第 {retry_count + 1} 次重传")
+            else:
+                print(f"消息 (CSeq: {params.cseq}) 已达到最大重试次数 {self.max_retries}，放弃重传")
 
-    # def parase_message(self, subject, message_body):
-    #     if subject == "vcu_register":
-    #         info = RoleInfo().parse(message_body)
-    #     elif subject == "vcu_phone":
-    #         info = TelBtnInfo.parse(message_body)
-    #     elif subject == "vcu_frequency":
-    #         info = FreqBtnInfo.parse(message_body)
-    #     elif subject == "vcu_radio":
-    #         info = RadioInfo.parse(message_body)
-    #     elif subject == "vcu_function":
-    #         info = MyFunBtnInfo.parse(message_body)
-    #     else:
-    #         print(f"未知主题: {subject}")
-    #         return
-    #     return info
 
     def receive_message(self):
+        """接收消息并处理"""
         while True:
+            self._check_timeout()
             data, addr = self.socket.recvfrom(10240)  # 缓冲区大小设为2048字节
             message = data.decode('utf-8')
             print(f"Received message from {addr}:\n{message}")
-            # 例如根据消息类型调用不同的处理方法
-            self.handle_message(message)
+            self._handle_message(message)
 
-    def handle_message(self, message):
+    def _handle_message(self, message):
         """处理收到的SIP消息"""
-        self.processing_message = True
         handle_status = False
         try:
             header_part, _, body = message.partition('\r\n\r\n')
@@ -400,14 +397,11 @@ class SIPClient:
                 print(f"收到非200响应: {recv_params.status_code}")
         except Exception as e:
             print(f"处理消息出错: {e}")
-        finally:
-            self.processing_message = not handle_status
-            # self._process_message_queue()
 
     def _handle_200_response(self, recv_params, body):
         """处理200 OK响应"""
         # 当前发送消息
-        cseq, params = self.cseq_history[0] if len(self.cseq_history) > 0 else (None, None)
+        cseq, params, _, _ = self.cseq_history[0] if len(self.cseq_history) > 0 else (None, None, None, None)
         # 根据报文类型处理
         # 心跳报文
         if cseq == recv_params.cseq and params.subject == "vcu_logout":
@@ -485,6 +479,8 @@ class SIPClient:
                 self.send_radio.remove(port)
             elif port in self.recv_radio:
                 self.recv_radio.remove(port)
+            if len(self.send_radio) + len(self.recv_radio) == 0:
+                self.rtp_endpoint.stop()
         elif params.message_type.upper() == 'BYE':
             print(f'离开电台: {port}')
             if port in self.send_radio:
@@ -492,3 +488,5 @@ class SIPClient:
             elif port in self.recv_radio:
                 self.recv_radio.remove(port)
             self.rtp_endpoint.stop()
+            if len(self.send_radio) + len(self.recv_radio) == 0:
+                self.rtp_endpoint.stop()

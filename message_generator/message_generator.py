@@ -4,7 +4,6 @@ from data_classes.params_classes import BaseMessageParams, RegisterParams, InfoP
 
 class MessageGenerator:
     def __init__(self):
-        self.cseq = 0
         self.branch_prefix = "z9hG4bK"
         self.call_id = str(uuid4())
         self.tag = str(random.randint(1000000000, 9999999999))
@@ -31,11 +30,7 @@ class MessageGenerator:
     
     def _genearate_cseq_header(self, params: BaseMessageParams):
         """生成CSeq头"""
-        if params.cseq is None:
-            self.cseq += 1
-            return f"{self.cseq} {params.message_type.upper()}"
-        else:
-            return f"{params.cseq} {params.message_type.upper()}"
+        return f"{params.cseq} {params.message_type.upper()}"
             
     def _generate_call_id_header(self, params: BaseMessageParams):
         """"生成Call-ID头"""
@@ -65,6 +60,7 @@ class MessageGenerator:
             from_header = from_header + f";roleid={params.roleid}"
         return from_header
     
+    # 待完善
     def _generate_to_header(self, params: BaseMessageParams):
         """生成To头"""
         if (params.method_type == "response" or params.message_type == 'ACK'):
