@@ -45,10 +45,11 @@ class SIPClient:
 
         # 当前状态
         self.status = "offline"  # 状态: "online", "offline", "busy"
+        self.selected_role = None
         self.send_radio = []
         self.recv_radio = []
         # 加入检索电台是发送还是接收、是否可用的逻辑
-        # self.selected_role = None
+
         # self.send_frequency = []
         # self.recv_frequency = []
         
@@ -91,11 +92,11 @@ class SIPClient:
         """发送SIP消息(带时序控制)"""
         # 记录发送历史
         if len(self.cseq_history) == 0:
-            self.socket.sendto(message.encode(), (self.remote_ip, self.remote_port))
             send_time = time.time()
             retry_count = 0
-            self.cseq_history.append((params.cseq, message, send_time, retry_count))
-            
+            self.cseq_history.append((params, message, send_time, retry_count))
+            self.socket.sendto(message.encode(), (self.remote_ip, self.remote_port))
+
     def keep_alive(self):
         """心跳报文"""
         while len(self.cseq_history) > 0:
@@ -307,7 +308,7 @@ class SIPClient:
         """退出电台选中"""
         while len(self.cseq_history) > 0:
             pass
-        if len(self.send_radio) + len(self.recv_radio) > 0:
+        if len(self.send_radio) + len(self.recv_radio) > 1:
             print("退出电台选中")
             params = ReferParams(
                 cseq = self._cseq_increment(),
@@ -362,15 +363,16 @@ class SIPClient:
     
     def _check_timeout(self):
         """检查超时"""
-        current_time = time.time()
-        params, message, send_time, retry_count = self.cseq_history[0] if len(self.cseq_history) > 0 else (None, None, None, None)
-        if current_time - send_time > self.retry_timeout:
-            if retry_count < self.max_retries:
-                self.socket.sendto(message.encode(), (self.remote_ip, self.remote_port))
-                self.cseq_history[0] = (params, message, current_time, retry_count + 1)
-                print(f"消息 (CSeq: {params.cseq}) 超时未确认，进行第 {retry_count + 1} 次重传")
-            else:
-                print(f"消息 (CSeq: {params.cseq}) 已达到最大重试次数 {self.max_retries}，放弃重传")
+        if len(self.cseq_history)>0:
+            current_time = time.time()
+            params, message, send_time, retry_count = self.cseq_history[0]
+            if current_time - send_time > self.retry_timeout:
+                if retry_count < self.max_retries:
+                    self.socket.sendto(message.encode(), (self.remote_ip, self.remote_port))
+                    self.cseq_history[0] = (params, message, current_time, retry_count + 1)
+                    print(f"消息 (CSeq: {params.cseq}) 超时未确认，进行第 {retry_count + 1} 次重传")
+                else:
+                    print(f"消息 (CSeq: {params.cseq}) 已达到最大重试次数 {self.max_retries}，放弃重传")
 
 
     def receive_message(self):
@@ -401,17 +403,17 @@ class SIPClient:
     def _handle_200_response(self, recv_params, body):
         """处理200 OK响应"""
         # 当前发送消息
-        cseq, params, _, _ = self.cseq_history[0] if len(self.cseq_history) > 0 else (None, None, None, None)
+        params, message, _, _ = self.cseq_history[0]
         # 根据报文类型处理
         # 心跳报文
-        if cseq == recv_params.cseq and params.subject == "vcu_logout":
-            self.status = "online"
-            print("状态变更为: online")
+        if params.cseq == recv_params.cseq and (params.subject == "vcu_logout" or params.subject == "vcu_login"):
             return True
         # 注册报文
-        elif cseq == recv_params.cseq and params.subject == "vcu_register":
+        elif params.cseq == recv_params.cseq and params.subject == "vcu_register":
             info = RoleInfo().parse(body)
             self.channel_list = info.ChannelNum
+            self.selected_role = info.szRoles[0]
+            self.status = "online"
             print(f"注册成功，通道列表: {self.channel_list}")
             return True
         # 按键报文
@@ -449,7 +451,7 @@ class SIPClient:
             else:
                 return False
         # 电台操控报文
-        elif cseq == recv_params.cseq and params.subject == "radio":
+        elif params.cseq == recv_params.cseq and params.subject == "radio":
             self._handle_radio_response(params)
             return True
         else:

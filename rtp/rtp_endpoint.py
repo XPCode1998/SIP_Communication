@@ -106,7 +106,6 @@ class RtpEndpoint:
         next_send_time = time.perf_counter() + (self.frame_duration / 1000)
 
         while self.is_running:
-            print('尝试读取音频数据...')
             # 从麦克风读取音频数据
             pcm_data = self.input_stream.read(
                 self.frame_size,
@@ -117,7 +116,7 @@ class RtpEndpoint:
             rms_value = audioop.rms(pcm_data, 2)
             has_voice = 1 if rms_value > self.voice_threshold else 0
 
-            print(f'has_voice: {has_voice}')
+            # print(f'has_voice: {has_voice}')
 
             # PCM转G.711 A-law
             alaw_data = audioop.lin2alaw(pcm_data, 2)
