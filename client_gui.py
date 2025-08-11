@@ -41,6 +41,27 @@ class SIPClientGUI:
         # 初始化按钮状态
         self.update_button_states()
 
+        # 启动keep_alive定时器
+        self.start_keep_alive_timer()
+
+    def start_keep_alive_timer(self):
+        """启动每3秒执行一次的keep_alive定时器"""
+        self.keep_alive_timer = threading.Timer(3.0, self.execute_keep_alive)
+        self.keep_alive_timer.daemon = True
+        self.keep_alive_timer.start()
+
+    def execute_keep_alive(self):
+        """执行keep_alive并重新启动定时器"""
+
+        try:
+            self.sip_client.keep_alive()
+            self.log_message("发送keep_alive心跳包")
+        except Exception as e:
+            self.log_message(f"发送keep_alive出错: {str(e)}")
+
+        # 重新启动定时器
+        self.start_keep_alive_timer()
+
     def create_widgets(self):
         # 主框架
         main_frame = Frame(self.master)
@@ -179,6 +200,9 @@ class SIPClientGUI:
 
     def on_closing(self):
         if messagebox.askokcancel("退出", "确定要退出程序吗？"):
+            # 取消定时器
+            if hasattr(self, 'keep_alive_timer'):
+                self.keep_alive_timer.cancel()
             self.master.destroy()
 
 
