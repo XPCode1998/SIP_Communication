@@ -91,7 +91,9 @@ class SIPClient:
     def _send_message(self, params, message):
         """发送SIP消息(带时序控制)"""
         # 记录发送历史
-        if len(self.cseq_history) == 0:
+        if params.message_type == 'ACK':
+            self.socket.sendto(message.encode(), (self.remote_ip, self.remote_port))
+        elif len(self.cseq_history) == 0:
             send_time = time.time()
             retry_count = 0
             self.cseq_history.append((params, message, send_time, retry_count))
@@ -285,7 +287,7 @@ class SIPClient:
         msg = self.message_generator.generate_message(params)
         self._send_message(params, msg)
 
-    def ack(self):
+    def ack(self, recv_params):
         """发送ACK报文"""
         params = BaseMessageParams(
             cseq = self._cseq_increment(),
@@ -295,6 +297,8 @@ class SIPClient:
             server_user=self.user,
             server_ip=self.server_ip,
             server_port=self.server_port,
+            tag = recv_params.tag,
+            to_tag = recv_params.to_tag,
             method_type="request",
             message_type="ACK",
             subject="radio",
@@ -452,12 +456,12 @@ class SIPClient:
                 return False
         # 电台操控报文
         elif params.cseq == recv_params.cseq and params.subject == "radio":
-            self._handle_radio_response(params)
+            self._handle_radio_response(params, recv_params)
             return True
         else:
             return False
 
-    def _handle_radio_response(self, params):
+    def _handle_radio_response(self, params, recv_params):
         """处理电台相关响应"""
         port = params.server_user
         if params.message_type.upper() == 'INVITE':
@@ -466,7 +470,7 @@ class SIPClient:
             else:
                 self.recv_radio.append(port)
             self.rtp_endpoint.start()
-            self.ack()
+            self.ack(recv_params)
         elif (params.message_type.upper() == 'REFER' and
               getattr(params, 'method', None) is None):
             print(f'加入电台: {port}')

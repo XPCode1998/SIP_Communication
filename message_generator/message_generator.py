@@ -63,8 +63,12 @@ class MessageGenerator:
     # 待完善
     def _generate_to_header(self, params: BaseMessageParams):
         """生成To头"""
-        if (params.method_type == "response" or params.message_type == 'ACK'):
+        if params.method_type == "response" and params.subject == "radio" and params.message_type == "INVITE":
+            return f"<sip:{params.server_user}@{params.server_ip}>;tag={str(random.randint(1000000000, 9999999999))}"
+        if params.method_type == "response" and (not str(params.status_code) == "100"):
             return f"<sip:{params.server_user}@{params.server_ip}>;tag={self.tag}"
+        elif params.message_type == 'ACK':
+            return f"<sip:{params.server_user}@{params.server_ip}>;tag={params.to_tag}"
         else:
             return f"<sip:{params.server_user}@{params.server_ip}>"
     
@@ -127,4 +131,4 @@ class MessageGenerator:
         """生成完整的SIP消息"""
         headers = self._gererate_headers(params)
         content = self._generate_content(params)
-        return "\r\n".join(headers) + "\r\n" + content  
+        return "\r\n".join(headers) + "\r\n" + content
