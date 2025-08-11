@@ -416,7 +416,7 @@ class SIPClient:
         elif params.cseq == recv_params.cseq and params.subject == "vcu_register":
             info = RoleInfo().parse(body)
             self.channel_list = info.ChannelNum
-            self.selected_role = info.szRoles[0]
+            self.selected_role = info.szRoles[0].split(':')[0]
             self.status = "online"
             print(f"注册成功，通道列表: {self.channel_list}")
             return True
