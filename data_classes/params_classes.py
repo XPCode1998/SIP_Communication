@@ -9,6 +9,7 @@ class BaseMessageParams:
     call_id: Optional[str] = None
     cseq: Optional[int] = None
     tag: Optional[str] = None
+    to_tag: Optional[str] = None
     local_user: str = None
     local_ip: str = None
     local_port: int = None
