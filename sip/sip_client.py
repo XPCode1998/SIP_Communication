@@ -13,6 +13,7 @@ from utils.utils import check_final_message
 from data_classes.comm_classes import Radio
 from collections import deque
 from rtp.rtp_endpoint import RtpEndpoint
+import re
 
 
 # 待加入功能：接收回复后发送
@@ -40,7 +41,7 @@ class SIPClient:
         # 服务器信息
         self.channel_list = []  # 通道列表
         self.role_list = []  # 角色列表
-        self.frequency_dict = {}  # 频率列表
+        self.frequency_list = []  # 频率列表
         self.radio_dict = {}  # 电台列表
 
         # 当前状态
@@ -65,12 +66,15 @@ class SIPClient:
         
         # 消息生成器和RTP客户端
         self.message_generator = MessageGenerator()
-        self.rtp_endpoint = RtpEndpoint(local_ip, local_rtp_port, remote_ip, remote_rtp_port)
+        self.local_rtp_port = local_rtp_port
+        self.rtp_endpoint = None
         
         # 创建UDP套接字
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind((self.local_ip, self.local_port))
         print(f"SIP Client initialized on {self.local_ip}:{self.local_port}")
+
+        self.latest_cseq=-1
 
     def _cseq_increment(self):
         """递增CSeq序号"""
@@ -200,6 +204,8 @@ class SIPClient:
             message_type="INFO",
             subject="vcu_radio",
             roleid=self.selected_role if self.selected_role else None,
+            content_type="application/frequency",
+            content="+".join(self.frequency_list),
         )
         msg = self.message_generator.generate_message(params)
         self._send_message(params, msg)
@@ -385,7 +391,7 @@ class SIPClient:
             self._check_timeout()
             data, addr = self.socket.recvfrom(10240)  # 缓冲区大小设为2048字节
             message = data.decode('utf-8')
-            print(f"Received message from {addr}:\n{message}")
+            # print(f"Received message from {addr}:\n{message}")
             self._handle_message(message)
 
     def _handle_message(self, message):
@@ -394,10 +400,12 @@ class SIPClient:
         try:
             header_part, _, body = message.partition('\r\n\r\n')
             recv_params = parse_sip_message(header_part)
-            if recv_params.status_code == 200:
+            # 加入处理INVITE OK 200回复3次的逻辑
+            if recv_params.status_code == 200 and not(recv_params.message_type == "INVITE" and recv_params.cseq <= self.latest_cseq):
                 handle_status = self._handle_200_response(recv_params, body)
                 if handle_status:
-                    print(f"处理消息成功: (CSeq: {recv_params.cseq})")
+                    # print(f"处理消息成功: (CSeq: {recv_params.cseq})")
+                    self.latest_cseq = self.cseq_history[0][0].cseq
                     self.cseq_history.popleft()
             else:
                 print(f"收到非200响应: {recv_params.status_code}")
@@ -432,9 +440,11 @@ class SIPClient:
                 return False
         elif params.subject == "vcu_frequency" and recv_params.content_type == "application/frequency_bt_info":
             info = FreqBtnInfo.parse(body)
+
             print("收到频率按钮信息:")
             for info_t in info:
                 print(f"  - {info_t}")
+                self.frequency_list.append(str(info_t.frequency))
             if check_final_message(recv_params.cseq):
                 return True
             else:
@@ -456,21 +466,32 @@ class SIPClient:
                 return False
         # 电台操控报文
         elif params.cseq == recv_params.cseq and params.subject == "radio":
-            self._handle_radio_response(params, recv_params)
+            self._handle_radio_response(params, recv_params, body)
             return True
         else:
             return False
 
-    def _handle_radio_response(self, params, recv_params):
+    def _handle_radio_response(self, params, recv_params, body):
         """处理电台相关响应"""
         port = params.server_user
+
         if params.message_type.upper() == 'INVITE':
             if self.radio_dict[port].type == 0:
                 self.send_radio.append(port)
             else:
                 self.recv_radio.append(port)
-            self.rtp_endpoint.start()
-            self.ack(recv_params)
+            # print(self.recv_radio)
+            # print(self.send_radio)
+            try:
+                match = re.search(r"m=audio (\d+)", body)
+                if match:
+                    port = match.group(1)
+                    print("Port:", port)
+                self.rtp_endpoint = RtpEndpoint(self.local_ip, self.local_rtp_port, self.remote_ip, int(port))
+                self.rtp_endpoint.start()
+                self.ack(recv_params)
+            except Exception as e:
+                print(f"解析SDP内容出错: {e}")
         elif (params.message_type.upper() == 'REFER' and
               getattr(params, 'method', None) is None):
             print(f'加入电台: {port}')

@@ -85,7 +85,7 @@ class MessageGenerator:
     
     def _generate_refered_by_header(self, params: BaseMessageParams):
         """生成Refered-By头"""
-        return f"<sip:{params.local_user}@{params.local_ip}>"
+        return f"<sip:{params.local_user}@{params.server_ip}>"
     
     def _generate_base_headers(self, params: BaseMessageParams):
         """生成基础头字段"""

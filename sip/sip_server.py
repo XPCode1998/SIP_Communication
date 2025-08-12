@@ -353,18 +353,18 @@ class SIPServer:
         if self.comm_count == 0:
             self.rtp_endpoint.stop()
 
-    def _generate_default_sdp(self):
-        """生成符合示例格式的SDP内容"""
-        return (
-            "v=0\r\n"
-            f"o=SELUS 2890844527 1 IN IP4 {self.local_ip}\r\n"
-            "s=Sip Call\r\n"
-            f"c=IN IP4 {self.local_ip}\r\n"
-            "t=0 0\r\n"
-            "m=audio 5200 RTP/AVP 8\r\n"
-            "a=rtpmap:8 PCMA/8000\r\n"
-            "a=sendrecv\r\n"
-        )
+    # def _generate_default_sdp(self):
+    #     """生成符合示例格式的SDP内容"""
+    #     return (
+    #         "v=0\r\n"
+    #         f"o=SELUS 2890844527 1 IN IP4 {self.local_ip}\r\n"
+    #         "s=Sip Call\r\n"
+    #         f"c=IN IP4 {self.local_ip}\r\n"
+    #         "t=0 0\r\n"
+    #         "m=audio 5200 RTP/AVP 8\r\n"
+    #         "a=rtpmap:8 PCMA/8000\r\n"
+    #         "a=sendrecv\r\n"
+    #     )
 
     def receive_message(self):
         while True:
@@ -400,3 +400,16 @@ class SIPServer:
             elif recv_params.message_type.upper() == "BYE" or (
                     recv_params.message_type.upper() == "REFER" and recv_params.method == "BYE"):
                 self.response_bye(recv_params)
+
+    def _generate_default_sdp(self):
+        """生成符合示例格式的SDP内容"""
+        return (
+            "v=0\r\n"
+            "o=SELUS 2890844527 1 IN IP4 192.168.1.4\r\n"
+            "s=Sip Call\r\n"
+            "c=IN IP4 192.168.1.4\r\n"
+            "t=0 0\r\n"
+            "m=audio 25272 RTP/AVP 8\r\n"
+            "a=rtpmap:8 PCMA/8000\r\n"
+            "a=sendrecv\r\n"
+        )
