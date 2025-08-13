@@ -97,7 +97,7 @@ def parse_sip_message(message: str) -> Union[BaseMessageParams, RegisterParams, 
                 
                 for part in to_parts[1:]:
                     if 'tag=' in part:
-                        params_dict['tag'] = part.split('=')[1]
+                        params_dict['to_tag'] = part.split('=')[1]
                         
             elif header_name == 'call-id':
                 params_dict['call_id'] = header_value

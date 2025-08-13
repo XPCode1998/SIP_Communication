@@ -21,7 +21,7 @@ class SIPClientGUI:
 
         # 初始化SIP客户端
         self.sip_client = SIPClient(
-            user='bxp',
+            user='16',
             local_ip=self.config['client']['ip'],
             local_port=self.config['client']['port'],
             remote_ip=self.config['server']['ip'],

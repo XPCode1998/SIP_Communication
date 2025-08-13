@@ -2,17 +2,18 @@ import random
 from uuid import uuid4
 from data_classes.params_classes import BaseMessageParams, RegisterParams, InfoParams, ReferParams
 
+
 class MessageGenerator:
     def __init__(self):
         self.branch_prefix = "z9hG4bK"
-        self.call_id = str(uuid4())
+        self.call_id = str(random.randint(1000000000, 9999999999))
         self.tag = str(random.randint(1000000000, 9999999999))
         self.user_agent = "Python SIP/2.0"
-    
+
     def _generate_request_header(self, params: BaseMessageParams):
         """生成请求行"""
         return f"{params.message_type.upper()} sip:{params.server_user}@{params.server_ip}:{params.server_port} SIP/2.0"
-    
+
     def _generate_response_header(self, params: BaseMessageParams):
         """生成状态行"""
         return f"SIP/2.0 {params.status_code} {params.reason_phrase}"
@@ -23,29 +24,29 @@ class MessageGenerator:
             return f"{self.branch_prefix}-{random.randint(1000000000, 9999999999)}"
         else:
             return params.branch
-        
+
     def _generate_via_header(self, params: BaseMessageParams):
         """生成Via头"""
         return f"SIP/2.0/UDP {params.local_ip}:{params.local_port};branch={self._generate_branch(params)}"
-    
+
     def _genearate_cseq_header(self, params: BaseMessageParams):
         """生成CSeq头"""
         return f"{params.cseq} {params.message_type.upper()}"
-            
+
     def _generate_call_id_header(self, params: BaseMessageParams):
         """"生成Call-ID头"""
         if params.call_id is None:
-            return f"{str(random.randint(1000000000, 9999999999))}@{params.local_ip}"
+            return f"{self.call_id}@{params.local_ip}"
         else:
             return params.call_id
-        
+
     def _generate_tag(self, params: BaseMessageParams):
         """生成tag"""
         if params.tag is None:
             self.tag = str(random.randint(1000000000, 9999999999))
         else:
             self.tag = params.tag
-    
+
     # 待修改 tag
     def _generate_from_header(self, params: BaseMessageParams):
         """生成From头"""
@@ -59,7 +60,7 @@ class MessageGenerator:
         if isinstance(params, InfoParams) and params.roleid is not None:
             from_header = from_header + f";roleid={params.roleid}"
         return from_header
-    
+
     # 待完善
     def _generate_to_header(self, params: BaseMessageParams):
         """生成To头"""
@@ -71,26 +72,27 @@ class MessageGenerator:
             return f"<sip:{params.server_user}@{params.server_ip}>;tag={params.to_tag}"
         else:
             return f"<sip:{params.server_user}@{params.server_ip}>"
-    
+
     def _generate_contact_header(self, params: BaseMessageParams):
         """生成Contact头"""
         return f"<sip:{params.local_user}@{params.local_ip}:{params.local_port}>"
-    
+
     def _generate_refer_to_header(self, params: ReferParams):
         """生成Refer-To头"""
         if params.method is not None:
             return f"<sip:{params.server_user}@{params.server_ip};method={params.method}>"
         else:
             return f"<sip:{params.server_user}@{params.server_ip}>"
-    
+
     def _generate_refered_by_header(self, params: BaseMessageParams):
         """生成Refered-By头"""
         return f"<sip:{params.local_user}@{params.server_ip}>"
-    
+
     def _generate_base_headers(self, params: BaseMessageParams):
         """生成基础头字段"""
         headers = [
-            self._generate_request_header(params) if params.method_type == "request" else self._generate_response_header(params),
+            self._generate_request_header(
+                params) if params.method_type == "request" else self._generate_response_header(params),
             f"Via: {self._generate_via_header(params)}",
             f"From: {self._generate_from_header(params)}",
             f"To: {self._generate_to_header(params)}",
@@ -99,7 +101,7 @@ class MessageGenerator:
             f"Max-Forwards: {params.max_forwards}",
         ]
         return headers
-    
+
     def _gererate_headers(self, params: BaseMessageParams):
         """生成完整的SIP头"""
         headers = self._generate_base_headers(params)
@@ -118,7 +120,7 @@ class MessageGenerator:
         if isinstance(params, ReferParams) and params.refered_by:
             headers.append(f"Refered-By: {self._generate_refered_by_header(params)}")
         return headers
-    
+
     def _generate_content(self, params: BaseMessageParams):
         """生成消息内容"""
         content = params.content if params.content is not None else ""
@@ -126,7 +128,7 @@ class MessageGenerator:
             return f"Content-Type: {params.content_type}\r\nContent-Length: {len(content)}\r\n\r\n{content}"
         else:
             return "Content-Length: 0\r\n\r\n"
-        
+
     def generate_message(self, params: BaseMessageParams):
         """生成完整的SIP消息"""
         headers = self._gererate_headers(params)

@@ -5,11 +5,12 @@ import audioop
 import random
 import threading
 from collections import deque
+import keyboard
 
 
 class RtpEndpoint:
-    def __init__(self, local_ip='127.0.0.1', local_port=16386,
-                 remote_ip='127.0.0.1', remote_port=16387):
+    def __init__(self, local_ip='127.0.0.1', local_port=5060,
+                 remote_ip='127.0.0.1', remote_port=5060):
         """RTP端点类，实现双向音频通信
 
         Args:
@@ -34,7 +35,7 @@ class RtpEndpoint:
         self.channels = 1  # 声道数
         self.frame_duration = 20  # 帧时长(ms)
         self.frame_size = int(self.sample_rate * self.frame_duration / 1000)
-        self.voice_threshold = 100  # 语音活动检测阈值
+        self.voice_threshold = 300  # 语音活动检测阈值
         self.sample_width = 2
 
         # 初始化音频设备
@@ -72,6 +73,8 @@ class RtpEndpoint:
 
         # 线程控制标志
         self.is_running = False
+        # 录音控制标志
+        self.is_recording = False
 
     def create_rtp_header(self, marker_bit):
         """创建RTP协议头部
@@ -104,6 +107,7 @@ class RtpEndpoint:
     def send_audio(self):
         """音频发送线程函数，每20ms发送一帧"""
         next_send_time = time.perf_counter() + (self.frame_duration / 1000)
+        silence_pcm = bytes([0] * self.frame_size * 2)
 
         while self.is_running:
             # 从麦克风读取音频数据
@@ -112,14 +116,15 @@ class RtpEndpoint:
                 exception_on_overflow=False
             )
 
-            # 计算RMS值检测语音活动
-            rms_value = audioop.rms(pcm_data, 2)
-            has_voice = 1 if rms_value > self.voice_threshold else 0
-
-            # print(f'has_voice: {has_voice}')
-
-            # PCM转G.711 A-law
-            alaw_data = audioop.lin2alaw(pcm_data, 2)
+            if self.is_recording:
+                # 计算RMS值检测语音活动
+                rms_value = audioop.rms(pcm_data, 2)
+                has_voice = 1 if rms_value > self.voice_threshold else 0
+                # PCM转G.711 A-law
+                alaw_data = audioop.lin2alaw(pcm_data, 2)
+            else:
+                has_voice = 0
+                alaw_data = audioop.lin2alaw(silence_pcm, 2)
 
             # 构造RTP数据包
             header = self.create_rtp_header(has_voice)
@@ -163,10 +168,8 @@ class RtpEndpoint:
             alaw_data = packet[12:12 + self.frame_size]
             pcm_data = audioop.alaw2lin(alaw_data, 2)
 
-
             # 加入抖动缓冲区
             self.jitter_buffer.append((pcm_data, marker))
-
 
             # 从缓冲区取出数据播放
             if len(self.jitter_buffer) >= self.buffer_size:
@@ -174,33 +177,40 @@ class RtpEndpoint:
                 self.output_stream.write(audio_frame)
                 # print(f"收到数据包 - 标记位: {marker_status}", end='\r')
 
+    def keyboard_listener(self):
+        """键盘监听"""
+        while self.is_running:
+            if keyboard.is_pressed('space'):
+                self.is_recording = True
+            else:
+                self.is_recording = False
+            time.sleep(0.1)
+
     def start(self):
         """启动RTP端点"""
         self.is_running = True
+        # 启动按键监听线程
+        keyboard_thread = threading.Thread(target=self.keyboard_listener)
+        keyboard_thread.daemon = True  # 将该线程设置为"守护线程"
+        keyboard_thread.start()
         # 启动发送线程
         sender_thread = threading.Thread(target=self.send_audio)
         sender_thread.daemon = True
         sender_thread.start()
-
+        # 启动接收线程
         receiver_thread = threading.Thread(target=self.receive_audio)
         receiver_thread.daemon = True
         receiver_thread.start()
 
-        # # 在主线程运行接收函数
-        # try:
-        #     self.receive_audio()
-        # except KeyboardInterrupt:
-        #     self.stop()
-
     def stop(self):
         """停止并释放资源"""
         self.is_running = False
-        self.input_stream.stop_stream()
-        self.input_stream.close()
-        self.output_stream.stop_stream()
-        self.output_stream.close()
-        self.audio.terminate()
-        self.socket.close()
+        self.input_stream.stop_stream()  # 停止音频输入流（如麦克风）
+        self.input_stream.close()  # 释放输入流资源
+        self.output_stream.stop_stream()  # 停止音频输出流（如扬声器）
+        self.output_stream.close()  # 释放输出流资源
+        self.audio.terminate()  # 销毁音频接口（如PyAudio实例）
+        self.socket.close()  # 关闭RTP/UDP套接字
         print("\nRTP端点已停止")
 
 
